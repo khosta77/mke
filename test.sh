@@ -1,4 +1,6 @@
 #!/bin/bash
+make
+
 ./main.out test/test1.inp test/test1.out
 python scripts/PostProcess.py test/test1.inp test/test1.out initial1.png deformed1.png
 

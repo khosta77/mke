@@ -70,16 +70,15 @@ struct Constraint
 {
 	enum Type
 	{
-		UX = 1 << 0,
-		UY = 1 << 1,
-		UXY = UX | UY
+		UX = 1, UY, UXY
 	};
+
 	int node;
 	Type type;
 };
 
-std::vector< Element >      elements;
-std::vector< Constraint >   constraints;
+std::vector<Element>      elements;
+std::vector<Constraint>   constraints;  // Ограничения
 
 inline void SetConstraints( Eigen::SparseMatrix<float>::InnerIterator& it, const int& index )
 {
@@ -91,27 +90,21 @@ void ApplyConstraints(Eigen::SparseMatrix<float>& K, const std::vector<Constrain
 {
 	std::vector<int> indicesToConstraint;
 
-	for( auto it = constraints.begin(), IT = constraints.end(); it != IT; ++it )
-	{
-		if (it->type & Constraint::UX)
-		{
-			indicesToConstraint.push_back(2 * it->node + 0);
-		}
+    for( const auto& constraint : constraints )
+    {
+		if( ( constraint.type & Constraint::UX ) )
+			indicesToConstraint.push_back( ( ( 2 * constraint.node ) + 0 ) );
 
-		if (it->type & Constraint::UY)
-		{
-			indicesToConstraint.push_back(2 * it->node + 1);
-		}
+		if( ( constraint.type & Constraint::UY ) )
+			indicesToConstraint.push_back( ( ( 2 * constraint.node ) + 1 ) );
 	}
 
-	for (int k = 0; k < K.outerSize(); ++k)
+	for( int k = 0, _K = K.outerSize(); k < _K; ++k )
 	{
-		for (Eigen::SparseMatrix<float>::InnerIterator it(K, k); it; ++it)
+		for( Eigen::SparseMatrix<float>::InnerIterator it( K, k ); it; ++it )
 		{
-			for (std::vector<int>::iterator idit = indicesToConstraint.begin(); idit != indicesToConstraint.end(); ++idit)
-			{
-				SetConstraints(it, *idit);
-			}
+			for( const int& indice : indicesToConstraint )	
+				SetConstraints( it, indice );
 		}
 	}
 }
@@ -130,33 +123,48 @@ public:
     const char *what() const noexcept override { return emsg.c_str(); }
 };
 
+/** \brief Матрица упрогости по з-ну Гука
+ * */
+Eigen::Matrix3f readAcalcDmatrix( std::istream& in )
+{
+	float poissonRatio, youngModulus;  // mu - Коэффицент Пуассона; E - модуль Юнга [МПа]
+	in >> poissonRatio >> youngModulus;
+
+	Eigen::Matrix3f D;  // Матрица упрогости
+	D << 1.0f,			poissonRatio,	0.0f,
+		 poissonRatio,	1.0,			0.0f,
+		 0.0f,			0.0f,			( ( 1.0f - poissonRatio ) / 2.0f );
+
+	D *= ( youngModulus / ( 1.0f - pow( poissonRatio, 2.0f ) );
+    return D;
+}
+
+/** \brief считываем ноды
+ * */
+void readNodes( std::istream& in )
+{
+	in >> nodesCount;
+	nodesX.resize(nodesCount);
+	nodesY.resize(nodesCount);
+
+	for( int i = 0; i < nodesCount; ++i )
+		in >> nodesX[i] >> nodesY[i];
+}
+
 int main(int argc, char *argv[])
 {
 	if ( argc != 3 )
         throw FileException( std::string( argv[0] ) );
 	
-	std::ifstream infile(argv[1]);
-	std::ofstream outfile(argv[2]);
+	std::ifstream infile( argv[1] );
+	std::ofstream outfile( argv[2] );
 	
-	float poissonRatio, youngModulus;  // mu - Коэффицент Пуассона; E - модуль Юнга [МПа]
-	infile >> poissonRatio >> youngModulus;
+	Eigen::Matrix3f D = readAcalcDmatrix(infile);  // Матрица упрогости
+    
+    //// Ноды
+    readNodes(in);
 
-	Eigen::Matrix3f D;
-	D << 1.0f,			poissonRatio,	0.0f,
-		 poissonRatio,	1.0,			0.0f,
-		 0.0f,			0.0f,			(1.0f - poissonRatio) / 2.0f;
-
-	D *= youngModulus / (1.0f - pow(poissonRatio, 2.0f));
-
-	infile >> nodesCount;
-	nodesX.resize(nodesCount);
-	nodesY.resize(nodesCount);
-
-	for (int i = 0; i < nodesCount; ++i)
-	{
-		infile >> nodesX[i] >> nodesY[i];
-	}
-
+    //// Элементы
 	int elementCount;
 	infile >> elementCount;
 
@@ -167,6 +175,7 @@ int main(int argc, char *argv[])
 		elements.push_back(element);
 	}
 
+    //// Ограничения
 	int constraintCount;
 	infile >> constraintCount;
 
@@ -179,6 +188,7 @@ int main(int argc, char *argv[])
 		constraints.push_back(constraint);
 	}
 
+    //// Нагрузки
 	loads.resize(2 * nodesCount);
 	loads.setZero();
 	int loadsCount;
@@ -193,7 +203,7 @@ int main(int argc, char *argv[])
 		loads[2 * node + 0] = x;
 		loads[2 * node + 1] = y;
 	}
-	
+// Тут закончилось чтение
 	std::vector<Eigen::Triplet<float> > triplets;
 	for (std::vector<Element>::iterator it = elements.begin(); it != elements.end(); ++it)
 	{
